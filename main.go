@@ -2,31 +2,69 @@ package main
 
 import (
   "fmt"
+  "strconv"
+  "time"
 
   "github.com/gin-gonic/gin"
   "github.com/jinzhu/gorm"
   _ "github.com/go-sql-driver/mysql"
 )
 
+type User struct {
+  gorm.Model
+  Name string
+  Email string
+}
+
 func main() {
-  _, err := sqlConnect()
-  if err != nil {
-      panic(err.Error())
-  } else {
-      fmt.Println("DB接続成功")
-  }
+  db := sqlConnect()
+  db.AutoMigrate(&User{})
+  defer db.Close()
 
   router := gin.Default()
   router.LoadHTMLGlob("templates/*.html")
 
   router.GET("/", func(ctx *gin.Context){
-      ctx.HTML(200, "index.html", gin.H{})
+    db := sqlConnect()
+    var users []User
+    db.Order("created_at asc").Find(&users)
+    defer db.Close()
+
+    ctx.HTML(200, "index.html", gin.H{
+      "users": users,
+    })
+  })
+
+  router.POST("/new", func(ctx *gin.Context) {
+    db := sqlConnect()
+    name := ctx.PostForm("name")
+    email := ctx.PostForm("email")
+    fmt.Println("create user " + name + " with email " + email)
+    db.Create(&User{Name: name, Email: email})
+    defer db.Close()
+
+    ctx.Redirect(302, "/")
+  })
+
+  router.POST("/delete/:id", func(ctx *gin.Context) {
+    db := sqlConnect()
+    n := ctx.Param("id")
+    id, err := strconv.Atoi(n)
+    if err != nil {
+      panic("id is not a number")
+    }
+    var user User
+    db.First(&user, id)
+    db.Delete(&user)
+    defer db.Close()
+
+    ctx.Redirect(302, "/")
   })
 
   router.Run()
 }
 
-func sqlConnect() (database *gorm.DB, err error) {
+func sqlConnect() (database *gorm.DB) {
   DBMS := "mysql"
   USER := "go_test"
   PASS := "password"
@@ -34,5 +72,25 @@ func sqlConnect() (database *gorm.DB, err error) {
   DBNAME := "go_database"
 
   CONNECT := USER + ":" + PASS + "@" + PROTOCOL + "/" + DBNAME + "?charset=utf8&parseTime=true&loc=Asia%2FTokyo"
-  return gorm.Open(DBMS, CONNECT)
+  
+  count := 0
+  db, err := gorm.Open(DBMS, CONNECT)
+  if err != nil {
+  for {
+    if err == nil {
+      fmt.Println("")
+      break
+    }
+    fmt.Println(err)
+    time.Sleep(time.Second)
+    count++
+    if count > 180 {
+      fmt.Println("")
+      panic(err)
+    }
+    db, err = gorm.Open(DBMS, CONNECT)
+  }
+  }
+
+  return db
 }
